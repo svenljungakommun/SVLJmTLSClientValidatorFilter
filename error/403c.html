@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>403 - Access Denied (mTLS)</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {
+            font-family: system-ui, sans-serif;
+            background-color: #f8f9fa;
+            color: #212529;
+            padding: 2rem;
+            max-width: 600px;
+            margin: auto;
+        }
+        .card {
+            background: white;
+            border: 1px solid #ced4da;
+            border-radius: 0.5rem;
+            padding: 2rem;
+        }
+        h1 {
+            color: #c92a2a;
+        }
+        .reason {
+            font-weight: bold;
+            color: #495057;
+            margin-top: 1rem;
+        }
+        code {
+            background-color: #f1f3f5;
+            padding: 0.2rem 0.4rem;
+            border-radius: 0.25rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>403 - Access Denied</h1>
+        <p>Your request could not be authenticated using a valid client certificate.</p>
+
+        <div class="reason" id="reasonText">
+            <p>Reason: unknown.</p>
+        </div>
+
+        <p>If you believe this is an error, please contact your administrator and provide the reason code below:</p>
+        <p><code id="reasonCode">-</code></p>
+    </div>
+
+<script>
+    const params = new URLSearchParams(window.location.search);
+    const reason = params.get("reason") || "unknown";
+
+    const reasonMap = {
+        "insecure-connection": "Connection is not secure (HTTPS required).",
+        "missing-cert": "No client certificate was provided.",
+        "issuer-name-mismatch": "The certificate was issued by an unexpected authority.",
+        "issuer-not-trusted": "The issuing certificate authority is not trusted.",
+        "crl-check-failed": "The certificate's revocation status could not be verified.",
+        "cert-expired": "The certificate has expired.",
+        "cert-notyetvalid": "The certificate is not yet valid.",
+        "serial-mismatch": "The certificate serial number was unexpected.",
+        "eku-missing": "The certificate does not include any Extended Key Usage (EKU) information.",
+        "eku-not-allowed": "The certificate's EKUs do not match the allowed purpose(s).",
+        "sigalg-not-allowed": "The certificate's signature algorithm is not allowed.",
+        "client-thumbprint-not-allowed": "The certificate thumbprint is not on the list of allowed values.",
+        "validation-error": "An unexpected error occurred during certificate validation."
+    };
+
+    document.getElementById("reasonText").innerHTML = `<p>Reason: ${reasonMap[reason] || "Your certificate could not be verified."}</p>`;
+    document.getElementById("reasonCode").textContent = reason;
+</script>
+</body>
+</html>
