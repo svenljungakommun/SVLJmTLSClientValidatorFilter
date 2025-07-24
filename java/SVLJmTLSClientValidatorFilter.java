@@ -90,6 +90,12 @@ public class SVLJmTLSClientValidatorFilter implements Filter {
             return;
         }
 
+        String path = req.getRequestURI();
+        if (path != null && path.startsWith("/error")) {
+            chain.doFilter(request, response);  // skip validation
+            return;
+        }
+
         X509Certificate[] certs = (X509Certificate[]) req.getAttribute("jakarta.servlet.request.X509Certificate");
         if (certs == null || certs.length == 0) {
             redirect(res, "missing-cert");
