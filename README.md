@@ -11,6 +11,8 @@ Maintainer: Svenljunga kommun
 
 It validates client X.509 certificates against configurable trust policies, including issuer verification, certificate chain validation using a local CA bundle, and optional thumbprint and signature algorithm enforcement. Built for secure municipal and public sector infrastructure in Zero Trust architectures.
 
+This filter is based on the original .NET `IHttpModule` [`SVLJmTLSClientValidatorModule`](https://github.com/svenljungakommun/SVLJmTLSClientValidatorModule) for IIS, and mirrors its validation logic, configuration principles, and "fail-closed" enforcement model.
+
 ---
 
 ## Features
