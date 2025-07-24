@@ -26,7 +26,6 @@ This filter is based on the original .NET `IHttpModule` [`SVLJmTLSClientValidato
   - Optional issuer thumbprint (`SVLJ_IssuerThumbprint`)
   - Optional strict client certificate serial whitelist (`SVLJ_CertSerialNumbers`)
   - Optional IP whitelist/bypass (`SVLJ_InternalBypassIPs`)
-  - Optional EKU validation (`SVLJ_AllowedEKUOids`)
   - Optional Signature Algorithm validation (`SVLJ_AllowedSignatureAlgorithms`)
   - Optional client certificate thumbprint validation (`SVLJ_AllowedClientThumbprints`)
 - 📤 Certificate attributes exposed as request attributes:
@@ -71,7 +70,6 @@ SVLJ_ErrorRedirectUrl=/error/403c.html
 
 SVLJ_CertSerialNumbers=12AB34CD56EF7890,ABCDE12345FEDCBA
 SVLJ_InternalBypassIPs=127.0.0.1,10.0.0.5
-SVLJ_AllowedEKUOids=1.3.6.1.5.5.7.3.2
 SVLJ_AllowedSignatureAlgorithms=sha256withrsa,ecdsaWithSHA256
 SVLJ_AllowedClientThumbprints=ABC123DEF456...,...
 ````
