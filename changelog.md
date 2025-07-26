@@ -1,8 +1,22 @@
 # Changelog – SVLJmTLSClientValidatorFilter
 
-All notable changes to this project are documented in this file.  
+All notable changes to this module will be documented in this file.
+
+This project adheres to a fail-closed Zero Trust model and is used in Apache Tomcat environments requiring mutual TLS authentication.
 
 ---
+## [0.4] – 2025-07-26
+
+### Added
+- Certificate chain validation using `CertPathValidator` against the configured CA bundle.
+  - Chain validation is mandatory and cannot be disabled.
+  - Failure to validate the chain results in redirect with `issuer-not-trusted`.
+
+### Changed
+- Validation step order updated:
+  - Chain validation is now performed before issuer thumbprint check.
+  - Ensures consistency with .NET module (`SVLJmTLSClientValidatorModule`).
+
 
 ## [0.3] – 2025-07-26
 
