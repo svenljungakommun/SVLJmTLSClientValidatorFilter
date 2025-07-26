@@ -20,3 +20,8 @@ All notable changes to this project are documented in this file.
 - Improved configuration parsing logic with consistent normalization (serials, thumbprints, algorithms, IPs)
 - Refactored and documented all helper methods (PEM loader, parser, splitter)
 - Code now adheres to consistent style, fail-closed policy and is production-ready
+
+
+## [0.2] – 2025-07-25
+Note: Version 0.2 was an internal development milestone and was never officially released.
+It served as a transitional build used to prototype EKU validation and refactor the validation logic.
