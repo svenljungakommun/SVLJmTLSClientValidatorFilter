@@ -27,4 +27,4 @@ Note: Version 0.2 was an internal development milestone and was never officially
 It served as a transitional build used to prototype EKU validation and refactor the validation logic.
 
 ## [0.1] – 2025-07-24
-Initial Java implementation of the mTLS validation module, ported from the .NET-based SVLJmTLSClientValidatorModule.
+Initial Java implementation of the mTLS validation filter, ported from the .NET-based SVLJmTLSClientValidatorModule.
