@@ -49,6 +49,7 @@ import java.security.cert.*;
 import java.util.*;
 import java.util.regex.*;
 import java.util.stream.*;
+import javax.naming.ldap.*;
 
 public class SVLJmTLSClientValidatorFilter implements Filter {
 
@@ -97,7 +98,7 @@ public class SVLJmTLSClientValidatorFilter implements Filter {
         HttpServletResponse res = (HttpServletResponse) response;
 
         String ip = req.getRemoteAddr();
-
+        
         /** Internal bypass (e.g. localhost, 127.0.0.1) */
         if (bypassIPs.contains(ip)) {
             chain.doFilter(request, response);
@@ -138,7 +139,7 @@ public class SVLJmTLSClientValidatorFilter implements Filter {
             req.setAttribute("X-SVLJ-SIGNATUREALG", clientCert.getSigAlgName());
 
             /** Step 2: Check expected Issuer CN */
-            if (!clientCert.getIssuerX500Principal().getName().contains("CN=" + issuerCN)) {
+            if (!issuerCN.equalsIgnoreCase(getCommonNameFromPrincipal(clientCert.getIssuerX500Principal()))) {
                 redirect(res, "issuer-name-mismatch");
                 return;
             }
@@ -190,7 +191,7 @@ public class SVLJmTLSClientValidatorFilter implements Filter {
                     redirect(res, "eku-missing");
                     return;
                 }
-                boolean match = ekuList.stream().anyMatch(oid -> allowedEKUOids.contains(oid));
+                boolean match = ekuList.stream().anyMatch(allowedEKUOids::contains);
                 if (!match) {
                     redirect(res, "eku-not-allowed");
                     return;
@@ -240,10 +241,6 @@ public class SVLJmTLSClientValidatorFilter implements Filter {
                 .collect(Collectors.toSet());
     }
 
-    /**
-     * Parses a PEM bundle and loads X.509 certificates using regex.
-     * Note: malformed PEM files may cause parsing errors.
-     */
     private List<X509Certificate> loadPEMCertificates(String path) throws Exception {
         List<X509Certificate> certs = new ArrayList<>();
         String pem = Files.readString(Paths.get(path));
@@ -257,9 +254,6 @@ public class SVLJmTLSClientValidatorFilter implements Filter {
         return certs;
     }
 
-    /**
-     * Generates SHA-1 thumbprint used for filtering allowed client certificates.
-     */
     private String thumbprint(X509Certificate cert) throws ServletException {
         try {
             byte[] encoded = cert.getEncoded();
@@ -273,15 +267,26 @@ public class SVLJmTLSClientValidatorFilter implements Filter {
         }
     }
 
-    /**
-     * Safe thumbprint generation for issuer certs (for use in Optional filter).
-     */
     private String safeThumbprint(X509Certificate cert) {
         try {
             return thumbprint(cert);
         } catch (Exception e) {
             return null;
         }
+    }
+
+    private String getCommonNameFromPrincipal(X500Principal principal) {
+        try {
+            LdapName ldapName = new LdapName(principal.getName());
+            for (Rdn rdn : ldapName.getRdns()) {
+                if ("CN".equalsIgnoreCase(rdn.getType())) {
+                    return rdn.getValue().toString();
+                }
+            }
+        } catch (Exception e) {
+            return principal.getName();
+        }
+        return null;
     }
 
     @Override
