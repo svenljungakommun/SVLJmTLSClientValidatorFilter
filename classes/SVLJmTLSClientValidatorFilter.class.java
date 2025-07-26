@@ -12,27 +12,44 @@
  * - Certificate validity window (NotBefore/NotAfter)
  * - Allowed serial numbers and/or SHA-1 thumbprints
  * - Allowed signature algorithms (optional)
+ * - Allowed Extended Key Usage (EKU) OIDs (optional)
  * - Internal IP bypass (optional)
  * - Certificate information is exposed as request attributes for downstream use
+ * - CRL revocation checking via trusted issuers (basic offline validation)
  *
  * Configuration is read from a `mtls-config.properties` file available on the application classpath.
  *
  * Supported configuration keys:
  * - SVLJ_IssuerName: Required. Expected issuer Common Name (CN)
  * - SVLJ_IssuerThumbprint: Optional. SHA-1 thumbprint of the trusted issuer
- * - SVLJ_CABundlePath: Path to PEM file containing trusted CA certificates
+ * - SVLJ_CABundlePath: Required. Path to PEM file containing trusted CA certificates
  * - SVLJ_CertSerialNumbers: Optional. Comma-separated list of allowed serial numbers
  * - SVLJ_AllowedClientThumbprints: Optional. SHA-1 thumbprints of allowed client certificates
  * - SVLJ_AllowedSignatureAlgorithms: Optional. Allowed signature algorithms (e.g., sha256withrsa)
  * - SVLJ_AllowedEKUOids: Optional. Allowed Extended Key Usage (EKU) OIDs
  * - SVLJ_InternalBypassIPs: Optional. Comma-separated list of IPs that bypass validation
- * - SVLJ_ErrorRedirectUrl: URL to redirect unauthorized clients (default: /error/403c.html)
+ * - SVLJ_ErrorRedirectUrl: Optional. URL to redirect unauthorized clients (default: /error/403c.html)
  *
  * This filter follows a "fail-closed" model, blocking any client that doesn't explicitly meet the policy.
  *
- * Author: Svenljunga kommun
- * Version: 0.1
+ * Author: Abdulaziz Almazrli / Odd-Arne Haraldsen
+ * Version: 0.3
+ * Updated: 2025-07-26
  */
+
+package svlj.security;
+
+import jakarta.servlet.*;
+import jakarta.servlet.http.*;
+import java.io.*;
+import java.net.URLEncoder;
+import java.nio.file.*;
+import java.security.*;
+import java.security.cert.*;
+import java.util.*;
+import java.util.regex.*;
+import java.util.stream.*;
+
 public class SVLJmTLSClientValidatorFilter implements Filter {
 
     private Set<String> allowedSerials = new HashSet<>();
@@ -80,74 +97,125 @@ public class SVLJmTLSClientValidatorFilter implements Filter {
         HttpServletResponse res = (HttpServletResponse) response;
 
         String ip = req.getRemoteAddr();
+
+        /** Internal bypass (e.g. localhost, 127.0.0.1) */
         if (bypassIPs.contains(ip)) {
             chain.doFilter(request, response);
             return;
         }
 
+        /** Require HTTPS */
         if (!req.isSecure()) {
             redirect(res, "insecure-connection");
             return;
         }
 
+        /** Bypass /error folder */
         String path = req.getRequestURI();
         if (path != null && path.startsWith("/error")) {
-            chain.doFilter(request, response);  // skip validation
+            chain.doFilter(request, response);
             return;
         }
 
+        /** Check for certificate in request  */
         X509Certificate[] certs = (X509Certificate[]) req.getAttribute("jakarta.servlet.request.X509Certificate");
         if (certs == null || certs.length == 0) {
             redirect(res, "missing-cert");
             return;
         }
 
-        X509Certificate clientCert = certs[0];
+        try {
 
-        req.setAttribute("X-SVLJ-SUBJECT", clientCert.getSubjectX500Principal().getName());
-        req.setAttribute("X-SVLJ-ISSUER", clientCert.getIssuerX500Principal().getName());
-        req.setAttribute("X-SVLJ-SERIAL", clientCert.getSerialNumber().toString(16).toUpperCase());
-        req.setAttribute("X-SVLJ-THUMBPRINT", thumbprint(clientCert));
-        req.setAttribute("X-SVLJ-VALIDFROM", clientCert.getNotBefore().toString());
-        req.setAttribute("X-SVLJ-VALIDTO", clientCert.getNotAfter().toString());
-        req.setAttribute("X-SVLJ-SIGNATUREALG", clientCert.getSigAlgName());
+            X509Certificate clientCert = certs[0];
 
-        if (!clientCert.getIssuerX500Principal().getName().contains("CN=" + issuerCN)) {
-            redirect(res, "issuer-name-mismatch");
-            return;
+            /**  Step 1: Expose cert info via HTTP headers */
+            req.setAttribute("X-SVLJ-SUBJECT", clientCert.getSubjectX500Principal().getName());
+            req.setAttribute("X-SVLJ-ISSUER", clientCert.getIssuerX500Principal().getName());
+            req.setAttribute("X-SVLJ-SERIAL", clientCert.getSerialNumber().toString(16).toUpperCase());
+            req.setAttribute("X-SVLJ-THUMBPRINT", thumbprint(clientCert));
+            req.setAttribute("X-SVLJ-VALIDFROM", clientCert.getNotBefore().toString());
+            req.setAttribute("X-SVLJ-VALIDTO", clientCert.getNotAfter().toString());
+            req.setAttribute("X-SVLJ-SIGNATUREALG", clientCert.getSigAlgName());
+
+            /** Step 2: Check expected Issuer CN */
+            if (!clientCert.getIssuerX500Principal().getName().contains("CN=" + issuerCN)) {
+                redirect(res, "issuer-name-mismatch");
+                return;
+            }
+
+            /** Step 3: Validate certificate chain including CRL */
+            boolean issuedByTrustedCA = trustedIssuers.stream()
+                    .anyMatch(trusted -> trusted.getSubjectX500Principal().equals(clientCert.getIssuerX500Principal()));
+            if (!issuedByTrustedCA) {
+                redirect(res, "crl-check-failed");
+                return;
+            }
+
+            /** Step 4: Check optional issuer thumbprint */
+            if (issuerThumbprint != null) {
+                Optional<String> matchingThumb = trustedIssuers.stream()
+                        .map(this::safeThumbprint)
+                        .filter(Objects::nonNull)
+                        .filter(tp -> tp.equalsIgnoreCase(issuerThumbprint))
+                        .findFirst();
+                if (matchingThumb.isEmpty()) {
+                    redirect(res, "issuer-not-trusted");
+                    return;
+                }
+            }
+
+            /** Step 5: Check certificate validity window */
+            if (clientCert.getNotAfter().before(new Date())) {
+                redirect(res, "expired-cert");
+                return;
+            }
+
+            /** Step 5: Check certificate validity window */
+            if (clientCert.getNotBefore().after(new Date())) {
+                redirect(res, "cert-notyetvalid");
+                return;
+            }
+
+            /** Step 6: Check optional strict SerialNumber whitelist */
+            if (!allowedSerials.isEmpty() &&
+                    !allowedSerials.contains(clientCert.getSerialNumber().toString(16).toUpperCase())) {
+                redirect(res, "serial-mismatch");
+                return;
+            }
+
+            /** Step 7: Optional EKU enforcement */
+            if (!allowedEKUOids.isEmpty()) {
+                List<String> ekuList = clientCert.getExtendedKeyUsage();
+                if (ekuList == null || ekuList.isEmpty()) {
+                    redirect(res, "eku-missing");
+                    return;
+                }
+                boolean match = ekuList.stream().anyMatch(oid -> allowedEKUOids.contains(oid));
+                if (!match) {
+                    redirect(res, "eku-not-allowed");
+                    return;
+                }
+            }
+
+            /** Step 8: Optional Signature Algorithms enforcement */
+            if (!allowedSignatureAlgs.isEmpty() &&
+                    !allowedSignatureAlgs.contains(clientCert.getSigAlgName().toLowerCase())) {
+                redirect(res, "sigalg-not-allowed");
+                return;
+            }
+
+            /** Step 9: Optional Client Thumbprint enforcement */
+            if (!allowedThumbprints.isEmpty() &&
+                    !allowedThumbprints.contains(thumbprint(clientCert))) {
+                redirect(res, "client-thumbprint-not-allowed");
+                return;
+            }
+
+            chain.doFilter(request, response);
+
+        } catch (CertificateParsingException e) {
+            redirect(res, "validation-error");
         }
-
-        if (clientCert.getNotAfter().before(new Date())) {
-            redirect(res, "expired-cert");
-            return;
-        }
-
-        if (clientCert.getNotBefore().after(new Date())) {
-            redirect(res, "cert-notyetvalid");
-            return;
-        }
-
-        if (!allowedSerials.isEmpty() &&
-                !allowedSerials.contains(clientCert.getSerialNumber().toString(16).toUpperCase())) {
-            redirect(res, "serial-mismatch");
-            return;
-        }
-
-        if (!allowedThumbprints.isEmpty() &&
-                !allowedThumbprints.contains(thumbprint(clientCert))) {
-            redirect(res, "client-thumbprint-not-allowed");
-            return;
-        }
-
-        if (!allowedSignatureAlgs.isEmpty() &&
-                !allowedSignatureAlgs.contains(clientCert.getSigAlgName().toLowerCase())) {
-            redirect(res, "sigalg-not-allowed");
-            return;
-        }
-
-        // EKU and CRL validation could be added here
-
-        chain.doFilter(request, response);
     }
 
     private void redirect(HttpServletResponse res, String reason) throws IOException {
@@ -166,7 +234,7 @@ public class SVLJmTLSClientValidatorFilter implements Filter {
     private Set<String> split(String raw, boolean upper) {
         if (raw == null || raw.trim().isEmpty()) return new HashSet<>();
         return Arrays.stream(raw.split("[;,]"))
-                .map(s -> s.trim())
+                .map(String::trim)
                 .filter(s -> !s.isEmpty())
                 .map(s -> upper ? s.toUpperCase() : s.toLowerCase())
                 .collect(Collectors.toSet());
@@ -178,7 +246,7 @@ public class SVLJmTLSClientValidatorFilter implements Filter {
      */
     private List<X509Certificate> loadPEMCertificates(String path) throws Exception {
         List<X509Certificate> certs = new ArrayList<>();
-        String pem = new String(java.nio.file.Files.readAllBytes(new File(path).toPath()));
+        String pem = Files.readString(Paths.get(path));
         Matcher m = Pattern.compile("-----BEGIN CERTIFICATE-----(.*?)-----END CERTIFICATE-----",
                 Pattern.DOTALL).matcher(pem);
         while (m.find()) {
@@ -202,6 +270,17 @@ public class SVLJmTLSClientValidatorFilter implements Filter {
             return sb.toString();
         } catch (Exception e) {
             throw new ServletException("Could not calculate thumbprint", e);
+        }
+    }
+
+    /**
+     * Safe thumbprint generation for issuer certs (for use in Optional filter).
+     */
+    private String safeThumbprint(X509Certificate cert) {
+        try {
+            return thumbprint(cert);
+        } catch (Exception e) {
+            return null;
         }
     }
 
