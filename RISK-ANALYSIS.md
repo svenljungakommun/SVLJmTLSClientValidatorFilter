@@ -59,7 +59,6 @@ The `SVLJmTLSClientValidatorFilter` protects web applications hosted in Apache T
 | Client serial/TP whitelist     | ✅ OK    | Optional – enforced if config provided                |
 | CA chain validation            | ⚠️ WARN | Checks issuer presence only; no path validation logic |
 | CRL revocation validation      | ❌ NONE  | No actual CRL parsing or revocation check done        |
-| OCSP support                   | ❌ NONE  | Not implemented                                       |
 | Configuration file integrity   | ⚠️ WARN | No schema or init-time validation of properties       |
 | Logging                        | ⚠️ WARN | No built-in structured logging or auditing            |
 
@@ -69,11 +68,10 @@ The `SVLJmTLSClientValidatorFilter` protects web applications hosted in Apache T
 
 | Recommendation                                              | Priority | Justification                                        |
 | ----------------------------------------------------------- | -------- | ---------------------------------------------------- |
-| Add offline CRL parsing (`X509CRL` support)                 | High     | Enable actual revocation checking of client certs    |
-| Add OCSP support (or fallback)                              | Medium   | Real-time revocation status check                    |
+| Add online CRL parsing (`X509CRL` support)                  | Critical | Enable actual revocation checking of client certs    |
+| Add offline CRL parsing (`X509CRL` support)                 | High     | Enable fallback revocation checking of client certs  |
 | Validate `mtls-config.properties` on startup                | Medium   | Prevent silent fallback or misconfiguration          |
 | Add syslog/JSON logging support                             | Medium   | Improve auditability and traceability                |
 | Validate full CA chain with path validation                 | Medium   | Improve trust chain correctness beyond subject match |
-| Expose `reason` code as HTTP header in addition to redirect | Low      | Easier debug integration for upstream services       |
 
 ---
