@@ -22,7 +22,6 @@ This filter is functionally equivalent to the official .NET module [`SVLJmTLSCli
   - Ensures HTTPS and client certificate presence
   - Matches Issuer CN (`SVLJ_IssuerName`) using structured DN parsing
   - Validates chain against PEM bundle (`SVLJ_CABundlePath`)
-  - Performs offline CRL check against trusted issuers
   - Validates NotBefore and NotAfter dates
   - Optional issuer thumbprint match (`SVLJ_IssuerThumbprint`)
   - Optional strict client certificate serial whitelist (`SVLJ_CertSerialNumbers`)
