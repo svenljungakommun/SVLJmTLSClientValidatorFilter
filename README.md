@@ -68,6 +68,7 @@ All used classes are part of the standard Java SDK and Jakarta EE:
 | CRL download (HTTP)  | `java.net.HttpURLConnection` | Included in JDK        |
 
 > ✅ No third-party dependencies or libraries required.
+> ⚠️ Tomcat versions prior to 10.x needs to be built using javax.*
 
 ---
 
