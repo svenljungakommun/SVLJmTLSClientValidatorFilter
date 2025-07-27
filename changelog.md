@@ -5,6 +5,18 @@ All notable changes to this module will be documented in this file.
 This project adheres to a fail-closed Zero Trust model and is used in Apache Tomcat environments requiring mutual TLS authentication.
 
 ---
+
+## [0.5] – 2025-07-27
+
+### Added
+- **Online CRL validation** via HTTP/HTTPS using Distribution Points (OID 2.5.29.31)
+  - Implemented method `isCertificateRevoked(X509Certificate cert)` using fail-closed model
+  - Added `extractCrlUrls()` to parse CRL URLs from certificate extension
+  - Introduced `downloadCRL()` with `HttpURLConnection` and CRL parsing
+
+### Changed
+- **Certificate chain validation** now explicitly separated from CRL checks
+
 ## [0.4] – 2025-07-26
 
 ### Added
