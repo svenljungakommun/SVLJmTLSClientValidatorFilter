@@ -68,11 +68,3 @@ Every check in `doFilter()` is fail-closed. That means:
   * Missing config keys
   * Missing CA file
   * Invalid certificate structure
-
----
-
-### ✅ **Conclusion**
-
-✅ The filter is **fully valid and production-safe** for use in Tomcat 10+.
-
-Every *soft-fail* or *validation error* results in a strict `302` redirect to the defined error URL (`errorRedirect`), with a `?reason=...` code matching the exact failure.
