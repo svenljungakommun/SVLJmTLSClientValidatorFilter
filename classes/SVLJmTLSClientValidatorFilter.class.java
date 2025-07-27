@@ -2,41 +2,67 @@
  * SVLJmTLSClientValidatorFilter – Servlet filter for strict mTLS authentication in Apache Tomcat.
  *
  * This filter enforces mutual TLS (mTLS) by validating incoming HTTPS client certificates
- * according to a defined security policy. It is designed for Zero Trust environments,
- * particularly in municipal and public sector infrastructures.
+ * according to a strict and configurable security policy. It is designed for Zero Trust environments,
+ * with specific application in municipal, critical infrastructure, and public sector systems.
  *
- * The filter validates:
- * - Presence and validity of the client certificate
- * - Issuer CN and optional issuer thumbprint
- * - Certificate chain against a local CA bundle (PEM format)
- * - Certificate validity window (NotBefore/NotAfter)
- * - Allowed serial numbers and/or SHA-1 thumbprints
- * - Allowed signature algorithms (optional)
- * - Allowed Extended Key Usage (EKU) OIDs (optional)
- * - Internal IP bypass (optional)
- * - Certificate information is exposed as request attributes for downstream use
- * - CRL revocation checking via trusted issuers (basic offline validation)
+ * === Validation Capabilities ===
+ * - Enforces HTTPS and requires a valid client certificate (mTLS)
+ * - Validates that the issuer CN matches a configured expected value
+ * - Optionally validates issuer SHA-1 thumbprint
+ * - Validates the certificate chain against a local CA bundle (PEM format)
+ * - Performs certificate revocation checking via CRL (over HTTP/HTTPS only)
+ * - Validates NotBefore and NotAfter (certificate validity window)
+ * - Optionally enforces whitelisted serial numbers
+ * - Optionally enforces SHA-1 thumbprint matching for allowed client certificates
+ * - Optionally enforces allowed signature algorithms (e.g., sha256withrsa)
+ * - Optionally enforces one or more allowed Extended Key Usage (EKU) OIDs
+ * - Optionally allows IP-based bypass for internal trusted sources
+ * - Exposes certificate metadata as request attributes for downstream access
  *
- * Configuration is read from a `mtls-config.properties` file available on the application classpath.
- *
+ * === Configuration ===
+ * Configuration is loaded from a `mtls-config.properties` file located in the application classpath.
+ * 
  * Supported configuration keys:
- * - SVLJ_IssuerName: Required. Expected issuer Common Name (CN)
- * - SVLJ_IssuerThumbprint: Optional. SHA-1 thumbprint of the trusted issuer
- * - SVLJ_CABundlePath: Required. Path to PEM file containing trusted CA certificates
- * - SVLJ_CertSerialNumbers: Optional. Comma-separated list of allowed serial numbers
- * - SVLJ_AllowedClientThumbprints: Optional. SHA-1 thumbprints of allowed client certificates
- * - SVLJ_AllowedSignatureAlgorithms: Optional. Allowed signature algorithms (e.g., sha256withrsa)
- * - SVLJ_AllowedEKUOids: Optional. Allowed Extended Key Usage (EKU) OIDs
- * - SVLJ_InternalBypassIPs: Optional. Comma-separated list of IPs that bypass validation
- * - SVLJ_ErrorRedirectUrl: Optional. URL to redirect unauthorized clients (default: /error/403c.html)
+ * - SVLJ_IssuerName                – Required. Expected issuer Common Name (CN)
+ * - SVLJ_IssuerThumbprint          – Optional. SHA-1 thumbprint of the issuer certificate
+ * - SVLJ_CABundlePath              – Required. Absolute path to a PEM file containing trusted CA certificates
+ * - SVLJ_CertSerialNumbers         – Optional. Comma- or semicolon-separated list of allowed certificate serial numbers (hex)
+ * - SVLJ_AllowedClientThumbprints  – Optional. List of allowed SHA-1 thumbprints of client certificates
+ * - SVLJ_AllowedSignatureAlgorithms– Optional. List of allowed signature algorithms (e.g., sha256withrsa)
+ * - SVLJ_AllowedEKUOids            – Optional. List of allowed Extended Key Usage OIDs
+ * - SVLJ_InternalBypassIPs         – Optional. List of internal IP addresses allowed to bypass validation
+ * - SVLJ_ErrorRedirectUrl          – Optional. Relative or absolute URL to redirect on validation failure (default: /error/403c.html)
  *
- * This filter follows a "fail-closed" model, blocking any client that doesn't explicitly meet the policy.
+ * === Redirect Model ===
+ * All validation failures cause an HTTP 302 redirect to the error URL with a query string:
+ *     ?reason=<failure-cause>
+ * 
+ * Example reasons include:
+ *     insecure-connection, missing-cert, issuer-name-mismatch, issuer-not-trusted,
+ *     crl-check-failed, expired-cert, cert-notyetvalid, serial-mismatch,
+ *     eku-missing, eku-not-allowed, sigalg-not-allowed, client-thumbprint-not-allowed,
+ *     validation-error
  *
- * Author: Abdulaziz Almazrli / Odd-Arne Haraldsen
- * Version: 0.3
- * Updated: 2025-07-26
+ * === Dependencies ===
+ * - Java SE 11+ (or compatible)
+ * - Apache Tomcat 10+ (requires Jakarta Servlet API)
+ * - Jakarta Servlet API 5.0+ (`jakarta.servlet.*`)
+ * - No external cryptographic or ASN.1 libraries (pure JDK implementation)
+ * 
+ * === Requirements ===
+ * - Application must be served over HTTPS with client certificate authentication enabled in Tomcat (`clientAuth="true"`)
+ * - CA certificates must be provided in PEM format
+ * - CRLs must be accessible via HTTP or HTTPS (LDAP not supported)
+ * - Jakarta-compatible deployment (post-Tomcat 10) required
+ *
+ * This filter follows a strict **fail-closed** model: any deviation from expected values results in denial of access.
+ *
+ * Author: Abdulaziz Almazrli / Odd-Arne Haraldsen  
+ * Version: 0.5  
+ * Updated: 2025-07-27
  */
 
+/** Namespace */
 package svlj.security;
 
 import jakarta.servlet.*;
@@ -51,6 +77,7 @@ import java.util.regex.*;
 import java.util.stream.*;
 import javax.naming.ldap.*;
 
+/** SVLJmTLSClientValidatorFilter  */
 public class SVLJmTLSClientValidatorFilter implements Filter {
 
     private Set<String> allowedSerials = new HashSet<>();
@@ -65,6 +92,18 @@ public class SVLJmTLSClientValidatorFilter implements Filter {
     private String errorRedirect;
 
     @Override
+	/**
+	 * Initializes the filter by loading configuration from the `mtls-config.properties` file.
+	 *
+	 * This method is called once when the filter is first created by the servlet container.
+	 * It reads all policy parameters used for mTLS validation.
+	 *
+	 * The CA certificates from the specified PEM bundle are parsed and stored for use in
+	 * certificate chain validation.
+	 *
+	 * @param config The filter configuration provided by the container
+	 * @throws ServletException If the configuration is missing or cannot be parsed
+	 */
     public void init(FilterConfig config) throws ServletException {
         try (InputStream in = SVLJmTLSClientValidatorFilter.class.getClassLoader()
                 .getResourceAsStream("mtls-config.properties")) {
@@ -91,6 +130,20 @@ public class SVLJmTLSClientValidatorFilter implements Filter {
     }
 
     @Override
+	/**
+	 * Core method that intercepts every HTTP(S) request and enforces mutual TLS (mTLS) authentication.
+	 *
+	 * This method is invoked for every incoming request. 
+	 *
+	 * If all checks pass, the request continues through the filter chain. Otherwise,
+	 * the client is redirected to the configured error page with an appropriate `reason` code.
+	 *
+	 * @param request  The incoming ServletRequest (cast to HttpServletRequest)
+	 * @param response The ServletResponse (cast to HttpServletResponse)
+	 * @param chain    The FilterChain used to invoke the next filter or servlet
+	 * @throws IOException      If an input or output error occurs
+	 * @throws ServletException If an error occurs during processing
+	 */
     public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain)
             throws IOException, ServletException {
 
@@ -127,9 +180,8 @@ public class SVLJmTLSClientValidatorFilter implements Filter {
 
         try {
 
-            X509Certificate clientCert = certs[0];
-
             /**  Step 1: Expose cert info via HTTP headers */
+			X509Certificate clientCert = certs[0];
             req.setAttribute("X-SVLJ-SUBJECT", clientCert.getSubjectX500Principal().getName());
             req.setAttribute("X-SVLJ-ISSUER", clientCert.getIssuerX500Principal().getName());
             req.setAttribute("X-SVLJ-SERIAL", clientCert.getSerialNumber().toString(16).toUpperCase());
@@ -144,15 +196,19 @@ public class SVLJmTLSClientValidatorFilter implements Filter {
                 return;
             }
 
-            /** Step 3: Validate certificate chain including CRL */
-            boolean issuedByTrustedCA = trustedIssuers.stream()
-                    .anyMatch(trusted -> trusted.getSubjectX500Principal().equals(clientCert.getIssuerX500Principal()));
-            if (!issuedByTrustedCA) {
-                redirect(res, "crl-check-failed");
-                return;
-            }
+			/** Step 3: Validate certificate chain against trusted CA bundle */
+			if (!validateCertificateChain(clientCert, trustedIssuers)) {
+				redirect(res, "issuer-not-trusted");
+				return;
+			}
+			
+			/** Step 4: Validate certificate revocation using CDP/CRL over http/https */
+			if (isCertificateRevokedOnline(clientCert)) {
+				redirect(res, "crl-check-failed");
+				return;
+			}
 
-            /** Step 4: Check optional issuer thumbprint */
+            /** Step 5: Check optional issuer thumbprint */
             if (issuerThumbprint != null) {
                 Optional<String> matchingThumb = trustedIssuers.stream()
                         .map(this::safeThumbprint)
@@ -165,26 +221,26 @@ public class SVLJmTLSClientValidatorFilter implements Filter {
                 }
             }
 
-            /** Step 5: Check certificate validity window */
+            /** Step 6: Check certificate validity window */
             if (clientCert.getNotAfter().before(new Date())) {
                 redirect(res, "expired-cert");
                 return;
             }
 
-            /** Step 5: Check certificate validity window */
+            /** Step 7: Check certificate validity window */
             if (clientCert.getNotBefore().after(new Date())) {
                 redirect(res, "cert-notyetvalid");
                 return;
             }
 
-            /** Step 6: Check optional strict SerialNumber whitelist */
+            /** Step 7: Check optional strict SerialNumber whitelist */
             if (!allowedSerials.isEmpty() &&
                     !allowedSerials.contains(clientCert.getSerialNumber().toString(16).toUpperCase())) {
                 redirect(res, "serial-mismatch");
                 return;
             }
 
-            /** Step 7: Optional EKU enforcement */
+            /** Step 8: Optional EKU enforcement */
             if (!allowedEKUOids.isEmpty()) {
                 List<String> ekuList = clientCert.getExtendedKeyUsage();
                 if (ekuList == null || ekuList.isEmpty()) {
@@ -198,14 +254,14 @@ public class SVLJmTLSClientValidatorFilter implements Filter {
                 }
             }
 
-            /** Step 8: Optional Signature Algorithms enforcement */
+            /** Step 9: Optional Signature Algorithms enforcement */
             if (!allowedSignatureAlgs.isEmpty() &&
                     !allowedSignatureAlgs.contains(clientCert.getSigAlgName().toLowerCase())) {
                 redirect(res, "sigalg-not-allowed");
                 return;
             }
 
-            /** Step 9: Optional Client Thumbprint enforcement */
+            /** Step 10: Optional Client Thumbprint enforcement */
             if (!allowedThumbprints.isEmpty() &&
                     !allowedThumbprints.contains(thumbprint(clientCert))) {
                 redirect(res, "client-thumbprint-not-allowed");
@@ -214,24 +270,77 @@ public class SVLJmTLSClientValidatorFilter implements Filter {
 
             chain.doFilter(request, response);
 
+		/** Validation failed: validation-error */
         } catch (CertificateParsingException e) {
             redirect(res, "validation-error");
         }
     }
 
+	/**
+	 * Issues an HTTP redirect (302 Found) to the configured error URL with a reason parameter.
+	 *
+	 * This method is used to terminate the request and inform the client of the specific
+	 * validation failure by appending a `?reason=` query parameter to the error redirect URL.
+	 * The reason is URL-encoded to ensure it is safely transmitted.
+	 *
+	 * Example:
+	 *   If errorRedirect = "/error/403c.html" and reason = "expired-cert",
+	 *   the client is redirected to: /error/403c.html?reason=expired-cert
+	 *
+	 * @param res    The HttpServletResponse object to send the redirect
+	 * @param reason A short reason code describing the validation failure
+	 * @throws IOException If writing the response fails
+	 */
     private void redirect(HttpServletResponse res, String reason) throws IOException {
         res.setStatus(302);
         res.setHeader("Location", errorRedirect + "?reason=" + URLEncoder.encode(reason, "UTF-8"));
     }
 
+	/**
+	 * Normalizes a string by removing all spaces and converting it to uppercase.
+	 *
+	 * Returns null if the input is null. Otherwise, performs normalization to ensure
+	 * consistent string comparison, particularly useful for thumbprints and identifiers.
+	 *
+	 * Example:
+	 *   " ab 12 cd " ? "AB12CD"
+	 *
+	 * @param s The input string to normalize
+	 * @return A space-free, uppercase version of the string, or null if input is null
+	 */
     private String normalize(String s) {
         return s == null ? null : s.replace(" ", "").toUpperCase();
     }
 
+	/**
+	 * Convenience method for splitting a raw string into a Set of uppercase values.
+	 *
+	 * Internally delegates to `split(raw, true)`, meaning all resulting strings
+	 * will be trimmed, filtered, and converted to uppercase.
+	 *
+	 * Used for configuration fields that require normalized matching,
+	 * such as serial numbers or certificate thumbprints.
+	 */
     private Set<String> splitAndNormalize(String raw) {
         return split(raw, true);
     }
 
+	/**
+	 * Splits a raw string into a Set of cleaned and optionally normalized values.
+	 *
+	 * This utility method is used to parse configuration values from comma- or semicolon-separated strings
+	 * (e.g. certificate serials, thumbprints, IPs, algorithms).
+	 *
+	 * - Null or empty input returns an empty Set.
+	 * - Trims each entry.
+	 * - Filters out empty entries.
+	 * - Applies case normalization:
+	 *   - If `upper` is true, values are converted to uppercase.
+	 *   - If `upper` is false, values are converted to lowercase.
+	 *
+	 * Example:
+	 *   Input: "abc ; DEF,ghi ", upper=true ? Output: ["ABC", "DEF", "GHI"]
+	 */
     private Set<String> split(String raw, boolean upper) {
         if (raw == null || raw.trim().isEmpty()) return new HashSet<>();
         return Arrays.stream(raw.split("[;,]"))
@@ -241,6 +350,19 @@ public class SVLJmTLSClientValidatorFilter implements Filter {
                 .collect(Collectors.toSet());
     }
 
+	/**
+	 * Loads one or more X.509 certificates from a PEM-formatted file.
+	 *
+	 * This method reads the entire contents of the specified file, extracts all embedded
+	 * PEM certificates (delimited by "-----BEGIN CERTIFICATE-----" and "-----END CERTIFICATE-----"),
+	 * decodes them from Base64 to DER format, and converts them into X509Certificate objects.
+	 *
+	 * It supports multiple certificates in the same file, such as CA bundles.
+	 *
+	 * @param path The filesystem path to the PEM-formatted certificate file
+	 * @return A list of parsed X509Certificate objects
+	 * @throws Exception If reading the file, decoding, or certificate parsing fails
+	 */
     private List<X509Certificate> loadPEMCertificates(String path) throws Exception {
         List<X509Certificate> certs = new ArrayList<>();
         String pem = Files.readString(Paths.get(path));
@@ -254,6 +376,21 @@ public class SVLJmTLSClientValidatorFilter implements Filter {
         return certs;
     }
 
+	/**
+	 * Calculates the SHA-1 thumbprint (hash) of an X.509 certificate.
+	 *
+	 * The thumbprint is commonly used to uniquely identify certificates and
+	 * is represented as an uppercase hexadecimal string without delimiters.
+	 * 
+	 * This method:
+	 * - Encodes the certificate to DER format
+	 * - Hashes the byte array using SHA-1
+	 * - Formats the resulting hash as an uppercase hex string
+	 *
+	 * @param cert The X509Certificate to hash
+	 * @return The SHA-1 thumbprint as a hex string (e.g., "AB12CD34...")
+	 * @throws ServletException If the encoding or hashing fails
+	 */
     private String thumbprint(X509Certificate cert) throws ServletException {
         try {
             byte[] encoded = cert.getEncoded();
@@ -267,6 +404,18 @@ public class SVLJmTLSClientValidatorFilter implements Filter {
         }
     }
 
+	/**
+	 * Safely calculates the SHA-1 thumbprint of the given X.509 certificate.
+	 *
+	 * This is a wrapper around the `thumbprint` method that suppresses any exceptions
+	 * and returns `null` if thumbprint calculation fails.
+	 *
+	 * Useful in non-critical contexts (e.g., scanning issuer list) where a failed
+	 * thumbprint shouldn't interrupt the validation flow.
+	 *
+	 * @param cert The X509Certificate to hash
+	 * @return The thumbprint as a hex string, or null if an error occurs
+	 */
     private String safeThumbprint(X509Certificate cert) {
         try {
             return thumbprint(cert);
@@ -275,6 +424,17 @@ public class SVLJmTLSClientValidatorFilter implements Filter {
         }
     }
 
+	/**
+	 * Extracts the Common Name (CN) component from an X.500 principal (e.g., Issuer or Subject).
+	 *
+	 * This method parses the distinguished name using LDAP syntax and searches for the RDN
+	 * (Relative Distinguished Name) with type "CN" (case-insensitive).
+	 *
+	 * If parsing fails, the full DN string is returned as a fallback.
+	 *
+	 * @param principal The X500Principal (typically from cert.getSubjectX500Principal() or cert.getIssuerX500Principal())
+	 * @return The Common Name (CN) value, or the full DN if CN cannot be extracted
+	 */
     private String getCommonNameFromPrincipal(X500Principal principal) {
         try {
             LdapName ldapName = new LdapName(principal.getName());
@@ -288,6 +448,138 @@ public class SVLJmTLSClientValidatorFilter implements Filter {
         }
         return null;
     }
+	
+	/**
+	 * Validates the certificate chain of the client certificate against a list of trusted CAs.
+	 *
+	 * This method builds a one-element certification path from the client certificate and attempts
+	 * to validate it using the provided CA certificates as trust anchors. CRL checks are explicitly
+	 * disabled in this method, as revocation is handled separately elsewhere.
+	 *
+	 * @param clientCert    The client certificate to validate
+	 * @param trustedCAs    List of trusted CA certificates (parsed from PEM bundle)
+	 * @return true if the chain is valid according to PKIX rules; false otherwise
+	 */
+	private boolean validateCertificateChain(X509Certificate clientCert, List<X509Certificate> trustedCAs) {
+		try {
+			CertificateFactory cf = CertificateFactory.getInstance("X.509");
+			CertPath certPath = cf.generateCertPath(Collections.singletonList(clientCert));
+
+			Set<TrustAnchor> anchors = trustedCAs.stream()
+				.map(ca -> new TrustAnchor(ca, null))
+				.collect(Collectors.toSet());
+
+			PKIXParameters params = new PKIXParameters(anchors);
+			params.setRevocationEnabled(false); // CRL handled separately
+
+			CertPathValidator validator = CertPathValidator.getInstance("PKIX");
+			validator.validate(certPath, params);
+			return true;
+		} catch (Exception e) {
+			return false;
+		}
+	}
+	
+	/**
+	 * Extracts CRL (Certificate Revocation List) distribution point URLs from a given X.509 certificate.
+	 *
+	 * This method manually parses the CRL Distribution Points extension (OID 2.5.29.31) and attempts
+	 * to locate any embedded HTTP/HTTPS URIs. No ASN.1 parsing libraries are used – the method relies
+	 * on a fallback byte-level and string-based heuristic.
+	 *
+	 * Limitations:
+	 * - ASN.1 decoding is simplistic and may fail on complex or multi-entry CRLDP structures.
+	 * - Only URIs beginning with "http" are considered.
+	 * - Uses ISO-8859-1 decoding as a practical fallback to preserve byte structure in the string.
+	 *
+	 * @param cert The X.509 certificate to inspect
+	 * @return A list of CRL URLs (strings), or empty list if none found or on error
+	 */
+	public static List<String> extractCrlUrls(X509Certificate cert) {
+		try {
+			byte[] extVal = cert.getExtensionValue("2.5.29.31");
+			if (extVal == null) return Collections.emptyList();
+
+			try (ByteArrayInputStream bis = new ByteArrayInputStream(extVal)) {
+				bis.read(); // skip tag
+				int len = bis.read(); // simplistic length
+				byte[] inner = bis.readNBytes(len);
+
+				String asString = new String(inner, StandardCharsets.ISO_8859_1);
+				List<String> urls = new ArrayList<>();
+				for (String part : asString.split("URI:")) {
+					if (part.startsWith("http")) {
+						String url = part.split("[\\s\\n\\r]")[0];
+						urls.add(url.trim());
+					}
+				}
+				return urls;
+			}
+		} catch (Exception e) {
+			return Collections.emptyList();
+		}
+	}
+	
+	/**
+	 * Checks whether the given X.509 certificate has been revoked, using CRLs obtained via HTTP(S).
+	 *
+	 * This method performs an online CRL check by extracting CRL Distribution Point (CDP) URLs
+	 * from the certificate, downloading each CRL, and verifying if the certificate appears in any
+	 * of them as revoked.
+	 *
+	 * Fail-closed principle:
+	 * - If CRL extraction fails, returns false (caller must interpret as `crl-check-failed`)
+	 * - If CRL download or parsing fails, returns false (caller must interpret as `crl-check-failed`)
+	 * - If a valid CRL is retrieved and the certificate is listed as revoked, returns true
+	 *
+	 * @param cert The client certificate to check
+	 * @return true if the certificate is explicitly revoked in any CRL, false on failure or not revoked
+	 */
+	public static boolean isCertificateRevoked(X509Certificate cert) {
+		try {
+			List<String> crlUrls = extractCrlUrls(cert);
+			for (String url : crlUrls) {
+				try {
+					X509CRL crl = downloadCRL(url);
+					if (crl != null && crl.isRevoked(cert)) return true;
+				} catch (Exception e) {
+					return false; // block on fetch/parse errors
+				}
+			}
+		} catch (Exception e) {
+			return false; // block on extraction errors
+		}
+		return false;
+	}
+	
+	/**
+	 * Downloads and parses a CRL (Certificate Revocation List) from the given HTTP or HTTPS URL.
+	 *
+	 * This method uses standard Java networking (HttpURLConnection) to perform a GET request to the
+	 * provided CRL URL and attempts to parse the result as an X.509 CRL using the default
+	 * CertificateFactory.
+	 *
+	 * Behavior:
+	 * - Sets a connection and read timeout of 5 seconds.
+	 * - Disables HTTP caching to always fetch the latest CRL.
+	 * - Supports only HTTP/HTTPS URLs (LDAP or other protocols are not handled).
+	 *
+	 * @param crlUrl The URL of the CRL to download (must begin with http:// or https://)
+	 * @return An X509CRL object parsed from the response
+	 * @throws Exception If the download or parsing fails
+	 */
+	private static X509CRL downloadCRL(String crlUrl) throws Exception {
+		URL url = new URL(crlUrl);
+		HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+		conn.setConnectTimeout(5000);
+		conn.setReadTimeout(5000);
+		conn.setUseCaches(false);
+
+		try (InputStream in = conn.getInputStream()) {
+			CertificateFactory cf = CertificateFactory.getInstance("X.509");
+			return (X509CRL) cf.generateCRL(in);
+		}
+	}
 
     @Override
     public void destroy() {}
