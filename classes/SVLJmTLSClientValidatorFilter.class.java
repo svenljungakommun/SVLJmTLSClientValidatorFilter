@@ -196,17 +196,17 @@ public class SVLJmTLSClientValidatorFilter implements Filter {
                 return;
             }
 
-			/** Step 3: Validate certificate chain against trusted CA bundle */
-			if (!validateCertificateChain(certs, trustedIssuers)) {
-				redirect(res, "issuer-not-trusted");
-				return;
-			}
-			
-			/** Step 4: Validate certificate revocation using CDP/CRL over http/https */
-			if (isCertificateRevoked(clientCert)) {
-				redirect(res, "crl-check-failed");
-				return;
-			}
+            /** Step 3: Validate certificate chain against trusted CA bundle */
+            if (!validateCertificateChain(certs, trustedIssuers)) {
+		redirect(res, "issuer-not-trusted");
+		return;
+            }
+	
+            /** Step 4: Validate certificate revocation using CDP/CRL over http/https */
+            if (isCertificateRevoked(clientCert)) {
+		redirect(res, "crl-check-failed");
+		return;
+            }
 
             /** Step 5: Check optional issuer thumbprint */
             if (issuerThumbprint != null) {
