@@ -58,8 +58,8 @@
  * This filter follows a strict **fail-closed** model: any deviation from expected values results in denial of access.
  *
  * Author: Abdulaziz Almazrli / Odd-Arne Haraldsen  
- * Version: 0.5  
- * Updated: 2025-07-27
+ * Version: 0.6
+ * Updated: 2025-07-28
  */
 
 /** Namespace */
@@ -197,13 +197,13 @@ public class SVLJmTLSClientValidatorFilter implements Filter {
             }
 
 			/** Step 3: Validate certificate chain against trusted CA bundle */
-			if (!validateCertificateChain(clientCert, trustedIssuers)) {
+			if (!validateCertificateChain(certs, trustedIssuers)) {
 				redirect(res, "issuer-not-trusted");
 				return;
 			}
 			
 			/** Step 4: Validate certificate revocation using CDP/CRL over http/https */
-			if (isCertificateRevokedOnline(clientCert)) {
+			if (isCertificateRevoked(clientCert)) {
 				redirect(res, "crl-check-failed");
 				return;
 			}
@@ -233,14 +233,14 @@ public class SVLJmTLSClientValidatorFilter implements Filter {
                 return;
             }
 
-            /** Step 7: Check optional strict SerialNumber whitelist */
+            /** Step 8: Check optional strict SerialNumber whitelist */
             if (!allowedSerials.isEmpty() &&
                     !allowedSerials.contains(clientCert.getSerialNumber().toString(16).toUpperCase())) {
                 redirect(res, "serial-mismatch");
                 return;
             }
 
-            /** Step 8: Optional EKU enforcement */
+            /** Step 9: Optional EKU enforcement */
             if (!allowedEKUOids.isEmpty()) {
                 List<String> ekuList = clientCert.getExtendedKeyUsage();
                 if (ekuList == null || ekuList.isEmpty()) {
@@ -254,14 +254,14 @@ public class SVLJmTLSClientValidatorFilter implements Filter {
                 }
             }
 
-            /** Step 9: Optional Signature Algorithms enforcement */
+            /** Step 10: Optional Signature Algorithms enforcement */
             if (!allowedSignatureAlgs.isEmpty() &&
                     !allowedSignatureAlgs.contains(clientCert.getSigAlgName().toLowerCase())) {
                 redirect(res, "sigalg-not-allowed");
                 return;
             }
 
-            /** Step 10: Optional Client Thumbprint enforcement */
+            /** Step 11: Optional Client Thumbprint enforcement */
             if (!allowedThumbprints.isEmpty() &&
                     !allowedThumbprints.contains(thumbprint(clientCert))) {
                 redirect(res, "client-thumbprint-not-allowed");
@@ -460,17 +460,17 @@ public class SVLJmTLSClientValidatorFilter implements Filter {
 	 * @param trustedCAs    List of trusted CA certificates (parsed from PEM bundle)
 	 * @return true if the chain is valid according to PKIX rules; false otherwise
 	 */
-	private boolean validateCertificateChain(X509Certificate clientCert, List<X509Certificate> trustedCAs) {
+	private boolean validateCertificateChain(X509Certificate[] chain, List<X509Certificate> trustedCAs) {
 		try {
 			CertificateFactory cf = CertificateFactory.getInstance("X.509");
-			CertPath certPath = cf.generateCertPath(Collections.singletonList(clientCert));
+			CertPath certPath = cf.generateCertPath(Arrays.asList(chain));
 
 			Set<TrustAnchor> anchors = trustedCAs.stream()
 				.map(ca -> new TrustAnchor(ca, null))
 				.collect(Collectors.toSet());
 
 			PKIXParameters params = new PKIXParameters(anchors);
-			params.setRevocationEnabled(false); // CRL handled separately
+			params.setRevocationEnabled(false); /** CRL handled separately */
 
 			CertPathValidator validator = CertPathValidator.getInstance("PKIX");
 			validator.validate(certPath, params);
@@ -479,6 +479,7 @@ public class SVLJmTLSClientValidatorFilter implements Filter {
 			return false;
 		}
 	}
+
 	
 	/**
 	 * Extracts CRL (Certificate Revocation List) distribution point URLs from a given X.509 certificate.
@@ -501,8 +502,8 @@ public class SVLJmTLSClientValidatorFilter implements Filter {
 			if (extVal == null) return Collections.emptyList();
 
 			try (ByteArrayInputStream bis = new ByteArrayInputStream(extVal)) {
-				bis.read(); // skip tag
-				int len = bis.read(); // simplistic length
+				bis.read(); /**skip tag */
+				int len = bis.read(); /** simplistic length */
 				byte[] inner = bis.readNBytes(len);
 
 				String asString = new String(inner, StandardCharsets.ISO_8859_1);
@@ -528,28 +529,40 @@ public class SVLJmTLSClientValidatorFilter implements Filter {
 	 * of them as revoked.
 	 *
 	 * Fail-closed principle:
-	 * - If CRL extraction fails, returns false (caller must interpret as `crl-check-failed`)
-	 * - If CRL download or parsing fails, returns false (caller must interpret as `crl-check-failed`)
-	 * - If a valid CRL is retrieved and the certificate is listed as revoked, returns true
+	 * - If CRL extraction fails, returns true (block)
+	 * - If CRL download or parsing fails, returns true (block)
+	 * - If no CRL URLs are found, returns true (block)
+	 * - If a valid CRL is retrieved and the certificate is listed as revoked, returns true (block)
+	 * - If all checks succeed and the certificate is not listed, returns false (allow)
 	 *
 	 * @param cert The client certificate to check
-	 * @return true if the certificate is explicitly revoked in any CRL, false on failure or not revoked
+	 * @return true if the certificate is explicitly revoked or CRL validation fails; false otherwise
 	 */
 	public static boolean isCertificateRevoked(X509Certificate cert) {
 		try {
 			List<String> crlUrls = extractCrlUrls(cert);
+			if (crlUrls.isEmpty()) return true; /** No CRL URLs found = fail-closed */
+
 			for (String url : crlUrls) {
 				try {
 					X509CRL crl = downloadCRL(url);
-					if (crl != null && crl.isRevoked(cert)) return true;
+					if (crl == null) return true; /**  fail-closed on null CRL */
+					if (crl.isRevoked(cert)) return true; /**  explicitly revoked */
 				} catch (Exception e) {
-					return false; // block on fetch/parse errors
+					
+					/** fail-closed on download/parse error */
+					return true;
 				}
 			}
+			
+			/** passed all checks, not revoked */
+			return false;
+			
 		} catch (Exception e) {
-			return false; // block on extraction errors
+			
+			/** fail-closed on extension extraction/parsing error */
+			return true;
 		}
-		return false;
 	}
 	
 	/**
@@ -582,5 +595,7 @@ public class SVLJmTLSClientValidatorFilter implements Filter {
 	}
 
     @Override
-    public void destroy() {}
+    public void destroy() {
+		/** No cleanup required */
+	}
 }
