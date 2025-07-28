@@ -6,6 +6,18 @@ This project adheres to a fail-closed Zero Trust model and is used in Apache Tom
 
 ---
 
+## [0.6] – 2025-07-28
+
+### Added
+- The filter now performs **complete validation of the entire client certificate chain**, from leaf certificate to a trusted CA root/intermediate.
+- This is implemented via `CertPathValidator` using `PKIXParameters` and the CA bundle (`SVLJ_CABundlePath`) as trust anchors.
+- This validation step is **strictly enforced** and cannot be bypassed or disabled.
+- **Redirect reason on failure:** `issuer-not-trusted`.
+
+### Changed
+- The `doFilter()` method now uses the full chain (`X509Certificate[]`) obtained from the servlet request.
+- The full chain is passed to the path validator instead of validating a single certificate.
+
 ## [0.5] – 2025-07-27
 
 ### Added
