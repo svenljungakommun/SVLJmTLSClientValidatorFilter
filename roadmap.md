@@ -37,9 +37,9 @@ They can be explicitly enabled via the `mtls-config.properties` file to ensure o
 
 | Feature                                               | Target Version |
 | ----------------------------------------------------- | -------------- |
-| Offline CRL fallback                                  | 0.6            |
-| KeyUsage bit enforcement                              | 0.7            |
-| JSON-formatted logging for SIEM                       | 0.8            |
+| Offline CRL fallback                                  | 0.7            |
+| KeyUsage bit enforcement                              | 0.8            |
+| JSON-formatted logging for SIEM                       | 0.9            |
 | Configuration validation at startup                   | 0.9            |
 | TLS cipher suite validation                           | 1.0            |
 | Code/parameter standardization                        | 1.1            |
