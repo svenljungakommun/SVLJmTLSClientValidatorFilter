@@ -58,8 +58,8 @@
  * This filter follows a strict **fail-closed** model: any deviation from expected values results in denial of access.
  *
  * Author: Abdulaziz Almazrli / Odd-Arne Haraldsen  
- * Version: 0.6
- * Updated: 2025-07-28
+ * Version: 1.4.5
+ * Updated: 2025-07-29
  */
 
 /** Namespace */
