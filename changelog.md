@@ -6,6 +6,9 @@ This project adheres to a fail-closed Zero Trust model and is used in Apache Tom
 
 ---
 
+## [1.4.5] – 2025-07-29
+`SVLJmTLSClientValidatorFilter` now fully harmonises with the latest version of `SVLJmTLSClientValidatorModule` and now has the same release version.
+
 ## [0.6] – 2025-07-28
 
 ### Added
