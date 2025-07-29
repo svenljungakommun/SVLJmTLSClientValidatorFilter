@@ -1,6 +1,7 @@
 # SVLJmTLSClientValidatorFilter v1.4.5
 
 **Mutual TLS (mTLS) enforcement filter for Apache Tomcat**
+
 Maintainer: Svenljunga kommun
 
 ---
