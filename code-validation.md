@@ -1,5 +1,5 @@
 # SVLJmTLSClientValidatorFilter Code Validation
-Updated: 2025-07-27 for version 0.5
+Updated: 2025-07-29 for version 1.4.5
 
 ### ✅ **Tomcat Filter Integration**
 
