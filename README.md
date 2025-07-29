@@ -53,7 +53,7 @@ SVLJmTLSClientValidator is available for .NET (IIS), Java (Tomcat), and Lua (Apa
 
 ## Compliance Alignment
 
-This module supports security controls required by:
+This filter supports security controls required by:
 
 - **NIS2 Directive**
 - **ISO/IEC 27001 & 27002**
