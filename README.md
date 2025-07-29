@@ -47,6 +47,18 @@ This filter is functionally equivalent to the .NET module [`SVLJmTLSClientValida
 
 ---
 
+## Compliance Alignment
+
+This module supports security controls required by:
+
+- **NIS2 Directive**
+- **ISO/IEC 27001 & 27002**
+- **GDPR (Art. 32 – Security of processing)**
+- **CIS Benchmarks**
+- **STIGs (US DoD)**
+
+---
+
 ## Requirements
 
 * **Java 11+**
