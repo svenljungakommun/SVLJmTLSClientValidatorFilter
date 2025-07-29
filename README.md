@@ -180,3 +180,9 @@ Invoke-WebRequest -Uri "https://your-app" -Certificate (Get-Item Cert:\CurrentUs
 ```bash
 openssl s_client -connect your-app:443 -cert client.crt -key client.key -CAfile ca-bundle.pem
 ```
+
+### Curl
+
+```bash
+curl --cert client.crt --key client.key https://your-app
+```
